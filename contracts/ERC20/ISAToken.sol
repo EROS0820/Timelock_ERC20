@@ -1,4 +1,5 @@
-pragma solidity >=0.4.25 <0.8.0;
+// SPDX-License-Identifier: MIT
+pragma solidity >=0.4.25 <=0.8.0;
 pragma experimental ABIEncoderV2;
 
 interface IERC20 {
@@ -49,7 +50,7 @@ contract Context {
     }
 }
 
-contract ERC20 is Context, IERC20, IERC20Metadata {
+contract ISAToken is Context, IERC20, IERC20Metadata {
     struct History {
         uint256 timestamp;
         uint256 amount;
@@ -71,11 +72,11 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     
     address private minter;
 
-    constructor(string memory name, string memory symbol) public {
-        _name = name;
-        _symbol = symbol;
+    constructor() public {
+        _name = "ISAToken";
+        _symbol = "ISAT";
         _decimals = 18;
-        _mint(_msgSender(), 400000000 * (10 ** uint(decimals())));
+        _mint(_msgSender(), 1000000000000 * (10 ** uint(decimals())));
         minter = _msgSender();
     }
 
@@ -188,8 +189,41 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
 
         uint256 senderBalance = _balances[sender];
         require(senderBalance >= amount, "Transfer amount exceeds balance");
-        _balances[sender] = senderBalance - amount;
-        _balances[recipient] += amount;
+
+        uint256 recipientBalance = _balances[recipient];
+        require((recipientBalance + amount) <= (_totalSupply / 10000), "Recipent balance exceeds limit");
+        
+        uint256 allowedAmount = 0;
+        for(uint256 i = 0; i < _buyHistories[sender].length; i++) {
+            History memory _history = _buyHistories[sender][i];
+            if (_history.timestamp < block.timestamp - 200) {
+                allowedAmount += _history.amount;
+            }
+        }
+        
+        require(amount <= allowedAmount, "Transfer amount exceeds time limit");
+        
+        uint256 deleteAmount = 0;
+        for(uint256 i = 0; i < _buyHistories[sender].length; i++) {
+            History memory _history = _buyHistories[sender][i];
+            if (deleteAmount + _history.amount <= amount)
+            {
+                deleteAmount += _history.amount;
+                _balances[sender] = senderBalance - _history.amount;
+                _balances[recipient] += _history.amount;
+                delete _buyHistories[sender][i];
+            }
+            else if (deleteAmount < amount && deleteAmount + _history.amount > amount)
+            {
+                _balances[sender] = senderBalance - (amount - deleteAmount);
+                _balances[recipient] += (amount - deleteAmount);
+                _history.amount -= (amount - deleteAmount);
+                deleteAmount = amount;
+                break;
+            }
+        }
+        
+        _buyHistories[recipient].push(History(block.timestamp, amount));
         emit Transfer(sender, recipient, amount);
     }
 
@@ -212,6 +246,7 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
 
         _totalSupply += amount;
         _balances[account] += amount;
+        _buyHistories[account].push(History(block.timestamp, amount));
         emit Transfer(address(0), account, amount);
     }
 
@@ -236,14 +271,14 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
     
     function buy(uint256 _amount) external {
         _transfer(minter, msg.sender, _amount);
-        _buyHistories[msg.sender].push(History(now, _amount));
+        _buyHistories[msg.sender].push(History(block.timestamp, _amount));
     }
     
     function sell(uint256 _amount) external {
         uint256 allowedAmount = 0;
         for(uint256 i = 0; i < _buyHistories[msg.sender].length; i++) {
             History memory _history = _buyHistories[msg.sender][i];
-            if (_history.timestamp < now - 100) {
+            if (_history.timestamp < block.timestamp - 100) {
                 allowedAmount += _history.amount; 
             }
         }
